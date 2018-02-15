@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -43,20 +42,21 @@ to quickly create a Cobra application.`,
 		}
 		defer f.Close()
 
+		reader := bufio.NewReaderSize(f, 1<<20)
 		for {
-			chunkBuf, err := readChunk(bufio.NewReaderSize(f, 1<<20))
+			data, _, err := reader.ReadLine()
 			if err == io.EOF {
-				if chunkBuf.Len() != 0 {
-					parseChunk(chunkBuf)
-				}
 				break
-			}
-			if err != nil {
+			} else if err != nil {
 				log.Fatal(err)
 			}
-			parseChunk(chunkBuf)
-
-			// fmt.Printf("%d\r", lineNo)
+			lineNo++
+			line := strings.TrimSpace(string(data))
+			_, err = rdf.Parse(line)
+			if err != nil && err != rdf.ErrEmpty {
+				fmt.Println(line)
+				errLines = append(errLines, lineNo)
+			}
 		}
 		fmt.Print("\n")
 
@@ -77,56 +77,4 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&rdfFile, "rdf", "r", "", "rdf file")
-}
-
-// https://github.com/dgraph-io/dgraph/blob/abfedfeb2b1017b582a9ed2d7735d49c0664c64e/dgraph/cmd/bulk/loader.go#L146-L176
-func readChunk(r *bufio.Reader) (*bytes.Buffer, error) {
-	batch := new(bytes.Buffer)
-	batch.Grow(10 << 20)
-	for lineCount := 0; lineCount < 1e5; lineCount++ {
-		slc, err := r.ReadSlice('\n')
-		if err == io.EOF {
-			batch.Write(slc)
-			return batch, err
-		}
-		if err == bufio.ErrBufferFull {
-			// This should only happen infrequently.
-			batch.Write(slc)
-			var str string
-			str, err = r.ReadString('\n')
-			if err == io.EOF {
-				batch.WriteString(str)
-				return batch, err
-			}
-			if err != nil {
-				return nil, err
-			}
-			batch.WriteString(str)
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		batch.Write(slc)
-	}
-	return batch, nil
-}
-
-func parseChunk(buf *bytes.Buffer) {
-	done := false
-	for !done {
-		line, err := buf.ReadString('\n')
-		lineNo++
-		if err == io.EOF {
-			done = true
-		} else if err != nil {
-			log.Fatal(err)
-		}
-		line = strings.TrimSpace(line)
-		_, err = rdf.Parse(line)
-		if err != nil && err != rdf.ErrEmpty {
-			fmt.Println(line)
-			errLines = append(errLines, lineNo)
-		}
-	}
 }
